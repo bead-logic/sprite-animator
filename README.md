@@ -33,7 +33,7 @@ This project is built with React and uses modern hooks. The easiest way to run i
 ### **Installation**
 
 1. Clone your repository and navigate into it:
-   ```bash
+```bash
    git clone \[https://github.com/YOUR-USERNAME/sprite-animator.git\](https://github.com/YOUR-USERNAME/sprite-animator.git)  
    cd sprite-animator
    ```
