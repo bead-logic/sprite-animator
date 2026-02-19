@@ -32,19 +32,23 @@ This project is built with React and uses modern hooks. The easiest way to run i
 
 ### **Installation**
 
-1. Clone your repository and navigate into it:  
+1. Clone your repository and navigate into it:
+   ```bash
    git clone \[https://github.com/YOUR-USERNAME/sprite-animator.git\](https://github.com/YOUR-USERNAME/sprite-animator.git)  
    cd sprite-animator
+   ```
 
-2. Install the dependencies:  
+2. Install the dependencies:
+ ```bash
    npm install  
    npm install lucide-react
-
-   *(Note: The gif.js library is loaded automatically via a CDN in the component, so you don't need to install it separately).*  
+   ```
+   *(Note: The `gif.js` library is loaded automatically via a CDN in the component, so you don't need to install it separately).*  
 3. Start the development server:  
+  ```bash
    npm run dev
-
-4. Open your browser to the local URL provided (usually http://localhost:5173).
+  ```
+4. Open your browser to the local URL provided (usually `http://localhost:5173`).
 
 ## **🛠️ Tech Stack**
 
