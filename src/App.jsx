@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Wand2, Image as ImageIcon, Download, Play, Pause, Plus, Minus, ScanEye, FileVideo } from 'lucide-react';
+import { Wand2, Image as ImageIcon, Download, Play, Pause, Plus, Minus, ScanEye, FileVideo, Move } from 'lucide-react';
 
 const App = () => {
   // State
@@ -22,6 +22,13 @@ const App = () => {
 
   // Cleaning Config
   const [bgTolerance, setBgTolerance] = useState(20); 
+  const [autoCenter, setAutoCenter] = useState(true);
+  const [exportCols, setExportCols] = useState(5);
+
+  // Keep exportCols synced with input cols by default
+  useEffect(() => {
+    setExportCols(cols);
+  }, [cols]);
 
   // Live Analysis State
   const [detectedMask, setDetectedMask] = useState(null);
@@ -70,8 +77,8 @@ const App = () => {
   const portalX = cellCenterX - (portalWidth / 2);
   const portalY = cellCenterY - (portalHeight / 2);
 
-  const translateX = -Math.floor(portalX * zoom);
-  const translateY = -Math.floor(portalY * zoom);
+  const translateX = -Math.floor(portalX * zoom) || 0;
+  const translateY = -Math.floor(portalY * zoom) || 0;
 
   // File Handler
   const handleUpload = (e) => {
@@ -107,7 +114,13 @@ const App = () => {
 
   // --- HELPER: Isolate Sprite Logic ---
   const isolateSpritePixels = (ctx, startX, startY, w, h, toleranceVal, bgR, bgG, bgB) => {
-    const imageData = ctx.getImageData(Math.floor(startX), Math.floor(startY), w, h);
+    // Prevent out of bounds or zero dimensions
+    const sx = Math.max(0, Math.floor(startX));
+    const sy = Math.max(0, Math.floor(startY));
+    const width = Math.max(1, Math.min(w, ctx.canvas.width - sx));
+    const height = Math.max(1, Math.min(h, ctx.canvas.height - sy));
+
+    const imageData = ctx.getImageData(sx, sy, width, height);
     const data = imageData.data;
     const tolerance = toleranceVal * 2.55;
 
@@ -117,22 +130,22 @@ const App = () => {
        return dist <= tolerance;
     };
 
-    const centerX = Math.floor(w / 2);
-    const centerY = Math.floor(h / 2);
+    const centerX = Math.floor(width / 2);
+    const centerY = Math.floor(height / 2);
     
     // Grid to track visited/solid pixels
-    const grid = new Int8Array(w * h).fill(0);
+    const grid = new Int8Array(width * height).fill(0);
     let seedX = -1, seedY = -1;
     let found = false;
 
     // Spiral search for seed
-    for (let radius = 0; radius < Math.min(w, h) / 2; radius += 2) {
+    for (let radius = 0; radius < Math.min(width, height) / 2; radius += 2) {
         for(let angle=0; angle<360; angle+=15) {
             const rad = angle * (Math.PI/180);
             const tx = Math.floor(centerX + radius * Math.cos(rad));
             const ty = Math.floor(centerY + radius * Math.sin(rad));
-            if (tx >= 0 && tx < w && ty >= 0 && ty < h) {
-                const idx = (ty * w + tx) * 4;
+            if (tx >= 0 && tx < width && ty >= 0 && ty < height) {
+                const idx = (ty * width + tx) * 4;
                 if (!isBg(data[idx], data[idx+1], data[idx+2], data[idx+3])) {
                     seedX = tx; seedY = ty; found = true; break;
                 }
@@ -145,7 +158,7 @@ const App = () => {
 
     // Flood Fill
     const stack = [[seedX, seedY]];
-    grid[seedY * w + seedX] = 1; 
+    grid[seedY * width + seedX] = 1; 
     const keepPixels = []; // {x, y} relative to Portal
 
     while(stack.length > 0) {
@@ -156,10 +169,10 @@ const App = () => {
         for(let n of neighbors) {
             const nx = cx + n[0];
             const ny = cy + n[1];
-            if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-                const gIdx = ny * w + nx;
+            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                const gIdx = ny * width + nx;
                 if (grid[gIdx] === 0) {
-                    const pIdx = (ny * w + nx) * 4;
+                    const pIdx = (ny * width + nx) * 4;
                     if (!isBg(data[pIdx], data[pIdx+1], data[pIdx+2], data[pIdx+3])) {
                         grid[gIdx] = 1; 
                         stack.push([nx, ny]);
@@ -174,49 +187,62 @@ const App = () => {
   // --- LIVE ANALYSIS EFFECT ---
   // Runs detection on the CURRENT FRAME whenever settings change
   useEffect(() => {
-    if (!sourceCanvasRef.current || !image || portalWidth === 0) return;
+    if (!sourceCanvasRef.current || !image || portalWidth <= 0 || portalHeight <= 0) return;
 
-    const ctx = sourceCanvasRef.current;
-    const bgPixel = ctx.getImageData(0, 0, 1, 1).data;
-    
-    // Calculate Portal Position for current frame
-    const cx = (currentCol * strideW) + (strideW / 2);
-    const cy = (currentRow * strideH) + (strideH / 2);
-    const px = cx - (portalWidth / 2);
-    const py = cy - (portalHeight / 2);
+    try {
+        const ctx = sourceCanvasRef.current;
+        const bgPixel = ctx.getImageData(0, 0, 1, 1).data;
+        
+        // Calculate Portal Position for current frame
+        const cx = (currentCol * strideW) + (strideW / 2);
+        const cy = (currentRow * strideH) + (strideH / 2);
+        const px = cx - (portalWidth / 2);
+        const py = cy - (portalHeight / 2);
 
-    const pixels = isolateSpritePixels(
-        ctx, px, py, portalWidth, portalHeight, 
-        bgTolerance, bgPixel[0], bgPixel[1], bgPixel[2]
-    );
+        const pixels = isolateSpritePixels(
+            ctx, px, py, portalWidth, portalHeight, 
+            bgTolerance, bgPixel[0], bgPixel[1], bgPixel[2]
+        );
 
-    setDetectedMask(pixels.length > 0 ? pixels : null);
+        setDetectedMask(pixels.length > 0 ? pixels : null);
+    } catch(e) {
+        console.error("Live analysis error", e);
+    }
 
-  }, [currentFrame, bgTolerance, cols, rows, portalWidth, portalHeight, image]);
+  }, [currentFrame, bgTolerance, cols, rows, portalWidth, portalHeight, image, currentCol, currentRow, strideW, strideH]);
 
 
   // --- BATCH PROCESS (Smart Clean) ---
   const performSmartClean = () => {
-    if (!sourceCanvasRef.current) return;
+    if (!sourceCanvasRef.current || portalWidth <= 0 || portalHeight <= 0) return;
     setIsProcessing(true);
 
     setTimeout(() => {
-      const ctx = sourceCanvasRef.current;
-      const w = ctx.canvas.width;
-      const h = ctx.canvas.height;
-      const bgPixel = ctx.getImageData(0, 0, 1, 1).data;
-      
-      const newSheetW = cols * portalWidth;
-      const newSheetH = rows * portalHeight;
+      try {
+        const ctx = sourceCanvasRef.current;
+        const w = ctx.canvas.width;
+        const h = ctx.canvas.height;
+        const bgPixel = ctx.getImageData(0, 0, 1, 1).data;
+        
+        const actualExportCols = Math.max(1, exportCols || cols);
+        const actualExportRows = Math.ceil(totalFrames / actualExportCols);
 
-      const outCanvas = document.createElement('canvas');
-      outCanvas.width = newSheetW;
-      outCanvas.height = newSheetH;
-      const outCtx = outCanvas.getContext('2d');
-      const srcData = ctx.getImageData(0,0,w,h).data; // Read entire source once (optimization) but accessing via loops
+        const newSheetW = Math.max(1, actualExportCols * portalWidth);
+        const newSheetH = Math.max(1, actualExportRows * portalHeight);
 
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
+        const outCanvas = document.createElement('canvas');
+        outCanvas.width = newSheetW;
+        outCanvas.height = newSheetH;
+        const outCtx = outCanvas.getContext('2d');
+        const srcData = ctx.getImageData(0,0,w,h).data; // Read entire source once (optimization) but accessing via loops
+
+        for (let i = 0; i < totalFrames; i++) {
+            const c = i % cols;
+            const r = Math.floor(i / cols);
+
+            const outC = i % actualExportCols;
+            const outR = Math.floor(i / actualExportCols);
+
             // 1. Define Source Portal
             const cx = (c * strideW) + (strideW / 2);
             const cy = (r * strideH) + (strideH / 2);
@@ -227,41 +253,71 @@ const App = () => {
             const pixels = isolateSpritePixels(ctx, px, py, portalWidth, portalHeight, bgTolerance, bgPixel[0], bgPixel[1], bgPixel[2]);
 
             // 3. Define Destination Cell
-            const cellX = c * portalWidth;
-            const cellY = r * portalHeight;
+            const cellX = outC * portalWidth;
+            const cellY = outR * portalHeight;
 
             const imgData = outCtx.createImageData(portalWidth, portalHeight);
 
-            // 4. Copy Valid Pixels 1:1
-            for (let p of pixels) {
-                const globalX = Math.floor(px + p.x);
-                const globalY = Math.floor(py + p.y);
+            // --- Auto-Center Math ---
+                let offsetX = 0;
+                let offsetY = 0;
                 
-                if (globalX >= 0 && globalX < w && globalY >= 0 && globalY < h) {
-                    const srcIdx = (globalY * w + globalX) * 4;
-                    const tgtIdx = (p.y * portalWidth + p.x) * 4;
-
-                    imgData.data[tgtIdx] = srcData[srcIdx];     
-                    imgData.data[tgtIdx+1] = srcData[srcIdx+1]; 
-                    imgData.data[tgtIdx+2] = srcData[srcIdx+2]; 
-                    imgData.data[tgtIdx+3] = srcData[srcIdx+3]; 
+                if (autoCenter && pixels.length > 0) {
+                    let minX = portalWidth, maxX = 0, minY = portalHeight, maxY = 0;
+                    for (let p of pixels) {
+                        if (p.x < minX) minX = p.x;
+                        if (p.x > maxX) maxX = p.x;
+                        if (p.y < minY) minY = p.y;
+                        if (p.y > maxY) maxY = p.y;
+                    }
+                    const spriteCenterX = minX + (maxX - minX) / 2;
+                    const spriteCenterY = minY + (maxY - minY) / 2;
+                    
+                    // Calculate shift needed to move sprite center to portal center
+                    offsetX = Math.floor((portalWidth / 2) - spriteCenterX);
+                    offsetY = Math.floor((portalHeight / 2) - spriteCenterY);
                 }
-            }
-            outCtx.putImageData(imgData, cellX, cellY);
-        }
-      }
 
-      setImage(outCanvas.toDataURL());
-      setSheetSize({ width: newSheetW, height: newSheetH });
-      setDetectedMask(null); 
-      setBgTolerance(0); 
-      setIsProcessing(false);
+                // 4. Copy Valid Pixels 1:1 (or Auto-Centered)
+                for (let p of pixels) {
+                    const globalX = Math.floor(px + p.x);
+                    const globalY = Math.floor(py + p.y);
+                    
+                    const destX = p.x + offsetX;
+                    const destY = p.y + offsetY;
+                    
+                    if (globalX >= 0 && globalX < w && globalY >= 0 && globalY < h && 
+                        destX >= 0 && destX < portalWidth && destY >= 0 && destY < portalHeight) {
+                        
+                        const srcIdx = (globalY * w + globalX) * 4;
+                        const tgtIdx = (destY * portalWidth + destX) * 4;
+
+                        imgData.data[tgtIdx] = srcData[srcIdx];     
+                        imgData.data[tgtIdx+1] = srcData[srcIdx+1]; 
+                        imgData.data[tgtIdx+2] = srcData[srcIdx+2]; 
+                        imgData.data[tgtIdx+3] = srcData[srcIdx+3]; 
+                    }
+                }
+                outCtx.putImageData(imgData, cellX, cellY);
+        }
+
+        setImage(outCanvas.toDataURL());
+        setSheetSize({ width: newSheetW, height: newSheetH });
+        setCols(actualExportCols);
+        setRows(actualExportRows);
+        setDetectedMask(null); 
+        setBgTolerance(0); 
+      } catch (e) {
+          console.error("Smart Clean Error", e);
+      } finally {
+        setIsProcessing(false);
+      }
     }, 100);
   };
 
   // --- EXPORT GIF ---
   const handleGifExport = async () => {
-    if (!image || !window.GIF) return;
+    if (!image || !window.GIF || portalWidth <= 0 || portalHeight <= 0) return;
     setIsExportingGif(true);
 
     try {
@@ -354,23 +410,30 @@ const App = () => {
 
   // Mask Canvas Helper
   const MaskOverlay = useMemo(() => {
-    if (!detectedMask || portalWidth === 0) return null;
+    if (!detectedMask || portalWidth <= 0 || portalHeight <= 0) return null;
     
-    const cvs = document.createElement('canvas');
-    cvs.width = portalWidth;
-    cvs.height = portalHeight;
-    const c = cvs.getContext('2d');
-    const id = c.createImageData(portalWidth, portalHeight);
-    
-    for(let p of detectedMask) {
-        const idx = (p.y * portalWidth + p.x) * 4;
-        id.data[idx] = 255;   // R
-        id.data[idx+1] = 0;   // G
-        id.data[idx+2] = 0;   // B
-        id.data[idx+3] = 100; // Alpha (Red tint)
+    try {
+        const cvs = document.createElement('canvas');
+        cvs.width = portalWidth;
+        cvs.height = portalHeight;
+        const c = cvs.getContext('2d');
+        const id = c.createImageData(portalWidth, portalHeight);
+        
+        for(let p of detectedMask) {
+            const idx = (p.y * portalWidth + p.x) * 4;
+            if (idx >= 0 && idx < id.data.length - 3) {
+                id.data[idx] = 255;   // R
+                id.data[idx+1] = 0;   // G
+                id.data[idx+2] = 0;   // B
+                id.data[idx+3] = 100; // Alpha (Red tint)
+            }
+        }
+        c.putImageData(id, 0, 0);
+        return cvs.toDataURL();
+    } catch (e) {
+        console.error("Mask overlay error", e);
+        return null;
     }
-    c.putImageData(id, 0, 0);
-    return cvs.toDataURL();
   }, [detectedMask, portalWidth, portalHeight]);
 
   return (
@@ -443,8 +506,8 @@ const App = () => {
             {image ? (
                // PORTAL VIEWPORT
                <div style={{
-                  width: `${portalWidth * zoom}px`,
-                  height: `${portalHeight * zoom}px`,
+                  width: `${(portalWidth || 0) * zoom}px`,
+                  height: `${(portalHeight || 0) * zoom}px`,
                   position: 'relative',
                   overflow: 'hidden',
                   boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
@@ -488,7 +551,7 @@ const App = () => {
              <button onClick={() => setIsPlaying(!isPlaying)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#4b5563' }}>{isPlaying ? <Pause /> : <Play />}</button>
              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#6b7280' }}>SPEED</span>
-                <input type="range" min="1" max="24" value={fps} onChange={(e) => setFps(parseInt(e.target.value))} style={{ width: '80px' }} />
+                <input type="range" min="1" max="24" value={fps} onChange={(e) => setFps(parseInt(e.target.value) || 1)} style={{ width: '80px' }} />
              </div>
              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#6b7280' }}>ZOOM</span>
@@ -518,11 +581,11 @@ const App = () => {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                     <div>
                         <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#6b7280', marginBottom: '4px' }}>COLUMNS</label>
-                        <input type="number" value={cols} onChange={(e) => setCols(Math.max(1, parseInt(e.target.value)))} style={{ width: '100%', padding: '6px', border: '1px solid #d1d5db', borderRadius: '6px' }} />
+                        <input type="number" min="1" value={cols} onChange={(e) => setCols(Math.max(1, parseInt(e.target.value) || 1))} style={{ width: '100%', padding: '6px', border: '1px solid #d1d5db', borderRadius: '6px' }} />
                     </div>
                     <div>
                         <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#6b7280', marginBottom: '4px' }}>ROWS</label>
-                        <input type="number" value={rows} onChange={(e) => setRows(Math.max(1, parseInt(e.target.value)))} style={{ width: '100%', padding: '6px', border: '1px solid #d1d5db', borderRadius: '6px' }} />
+                        <input type="number" min="1" value={rows} onChange={(e) => setRows(Math.max(1, parseInt(e.target.value) || 1))} style={{ width: '100%', padding: '6px', border: '1px solid #d1d5db', borderRadius: '6px' }} />
                     </div>
                 </div>
 
@@ -536,14 +599,14 @@ const App = () => {
                             <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#6b7280' }}>WIDTH</label>
                             <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#0369a1' }}>{portalWidth}px</span>
                         </div>
-                        <input type="range" min={1} max={Math.floor(strideW * 3)} value={portalWidth} onChange={(e) => setPortalWidth(parseInt(e.target.value))} style={{ width: '100%', accentColor: '#0ea5e9' }} />
+                        <input type="range" min={1} max={Math.max(1, Math.floor(strideW * 3))} value={portalWidth || 1} onChange={(e) => setPortalWidth(parseInt(e.target.value) || 1)} style={{ width: '100%', accentColor: '#0ea5e9' }} />
                     </div>
                     <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                             <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#6b7280' }}>HEIGHT</label>
                             <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#0369a1' }}>{portalHeight}px</span>
                         </div>
-                        <input type="range" min={1} max={Math.floor(strideH * 2)} value={portalHeight} onChange={(e) => setPortalHeight(parseInt(e.target.value))} style={{ width: '100%', accentColor: '#0ea5e9' }} />
+                        <input type="range" min={1} max={Math.max(1, Math.floor(strideH * 2))} value={portalHeight || 1} onChange={(e) => setPortalHeight(parseInt(e.target.value) || 1)} style={{ width: '100%', accentColor: '#0ea5e9' }} />
                     </div>
                     <p style={{ fontSize: '10px', color: '#0c4a6e', marginTop: '6px' }}>
                         Shrink to crop or expand until the full character stays inside the blue box.
@@ -556,7 +619,33 @@ const App = () => {
                         <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#6b7280' }}>CLEAN TOLERANCE (Red Tint)</label>
                         <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#ef4444' }}>{bgTolerance}%</span>
                     </div>
-                    <input type="range" min="0" max="50" value={bgTolerance} onChange={(e) => setBgTolerance(parseInt(e.target.value))} style={{ width: '100%', accentColor: '#ef4444', height: '4px' }} />
+                    <input type="range" min="0" max="50" value={bgTolerance || 0} onChange={(e) => setBgTolerance(parseInt(e.target.value) || 0)} style={{ width: '100%', accentColor: '#ef4444', height: '4px' }} />
+                </div>
+
+                {/* Auto Center Toggle */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', marginBottom: '8px' }}>
+                    <input 
+                        type="checkbox" 
+                        id="autoCenter" 
+                        checked={autoCenter} 
+                        onChange={(e) => setAutoCenter(e.target.checked)} 
+                        style={{ width: '16px', height: '16px', accentColor: '#4f46e5' }}
+                    />
+                    <label htmlFor="autoCenter" style={{ fontSize: '12px', fontWeight: 'bold', color: '#4b5563', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <Move size={14} /> Auto-Center Sprites (Fixes jitter)
+                    </label>
+                </div>
+
+                {/* Export Layout */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '4px', background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div>
+                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#6b7280', marginBottom: '4px' }}>OUTPUT COLUMNS</label>
+                        <input type="number" min="1" value={exportCols} onChange={(e) => setExportCols(Math.max(1, parseInt(e.target.value) || 1))} style={{ width: '100%', padding: '6px', border: '1px solid #d1d5db', borderRadius: '6px' }} />
+                    </div>
+                    <div>
+                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#6b7280', marginBottom: '4px' }}>OUTPUT ROWS (Auto)</label>
+                        <input type="number" disabled value={Math.ceil(totalFrames / (exportCols || cols))} style={{ width: '100%', padding: '6px', border: '1px solid #d1d5db', borderRadius: '6px', backgroundColor: '#e5e7eb', color: '#6b7280' }} />
+                    </div>
                 </div>
 
                 {/* Main Action */}
