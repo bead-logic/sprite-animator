@@ -1,6 +1,6 @@
 # Sprite Animator 🧙‍♂️
 
-SpriteMagic is a web-based React application designed to preview, clean, and export sprite sheets. It is especially useful for game developers working with tightly packed or AI-generated sprite sheets where characters might "bleed" into adjacent frames.
+Sprite Animator is a web-based React application designed to preview, clean, and export sprite sheets. It is especially useful for game developers working with tightly packed or AI-generated sprite sheets where characters might "bleed" into adjacent frames.
 
 With SpriteMagic, you can define a custom viewing portal, automatically isolate your main sprite using a flood-fill algorithm, and export the result as a perfectly spaced new sprite sheet or an animated GIF.
 
