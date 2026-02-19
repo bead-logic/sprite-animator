@@ -1,4 +1,4 @@
-# SpriteMagic 🧙‍♂️
+# Sprite Animator 🧙‍♂️
 
 SpriteMagic is a web-based React application designed to preview, clean, and export sprite sheets. It is especially useful for game developers working with tightly packed or AI-generated sprite sheets where characters might "bleed" into adjacent frames.
 
@@ -47,7 +47,7 @@ Node.js installed on your machine.
 Create a new Vite React project:
 ```bash
 npm create vite@latest spritemagic -- --template react
-cd spritemagic
+cd sprite-animator
 ```
 
 Install the required icon library (`lucide-react`):
